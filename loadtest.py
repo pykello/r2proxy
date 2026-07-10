@@ -13,7 +13,7 @@ import boto3
 from botocore.config import Config
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--endpoint", default=os.getenv("R2PROXY_ENDPOINT_URL", "http://144.76.134.100:8080"))
+ap.add_argument("--endpoint", default=os.getenv("R2PROXY_ENDPOINT_URL", "http://localhost:8080"))
 ap.add_argument("--bucket", default="test")
 ap.add_argument("--count", type=int, default=1000)
 ap.add_argument("--size-mb", type=float, default=1.0)
