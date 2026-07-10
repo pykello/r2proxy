@@ -14,7 +14,6 @@ type OpStat struct {
 	BytesIn  int64   `json:"bytes_in"`
 	BytesOut int64   `json:"bytes_out"`
 	LatSumMs float64 `json:"lat_sum_ms"`
-	LatMaxMs float64 `json:"lat_max_ms"`
 }
 
 func (o *OpStat) add(s reqRecord) {
@@ -28,9 +27,6 @@ func (o *OpStat) add(s reqRecord) {
 	o.BytesIn += s.BytesIn
 	o.BytesOut += s.BytesOut
 	o.LatSumMs += s.DurationMs
-	if s.DurationMs > o.LatMaxMs {
-		o.LatMaxMs = s.DurationMs
-	}
 }
 
 // reqRecord is a single completed request, kept in a ring buffer for the UI.
@@ -49,7 +45,7 @@ type reqRecord struct {
 	Err        string    `json:"err,omitempty"`
 }
 
-// Stats is a concurrency-safe collector for one tenant.
+// Stats is a concurrency-safe statistics collector.
 type Stats struct {
 	mu        sync.Mutex
 	start     time.Time
@@ -60,7 +56,6 @@ type Stats struct {
 	bytesOut  int64
 	inFlight  int64
 	byOp      map[string]*OpStat
-	byBucket  map[string]*OpStat
 	byStatus  map[int]int64
 	latencies []float64 // ring buffer of recent latencies for percentiles
 	latPos    int
@@ -78,7 +73,6 @@ func newStats() *Stats {
 	return &Stats{
 		start:    time.Now(),
 		byOp:     map[string]*OpStat{},
-		byBucket: map[string]*OpStat{},
 		byStatus: map[int]int64{},
 	}
 }
@@ -106,9 +100,6 @@ func (s *Stats) record(r reqRecord) {
 	}
 	s.byStatus[r.Status]++
 	s.opStat(s.byOp, r.Op).add(r)
-	if r.Bucket != "" {
-		s.opStat(s.byBucket, r.Bucket).add(r)
-	}
 
 	if len(s.latencies) < maxLatencies {
 		s.latencies = append(s.latencies, r.DurationMs)
@@ -142,7 +133,6 @@ func (s *Stats) reset() {
 	*s = Stats{
 		start:    time.Now(),
 		byOp:     map[string]*OpStat{},
-		byBucket: map[string]*OpStat{},
 		byStatus: map[int]int64{},
 		inFlight: inFlight,
 	}
@@ -160,7 +150,6 @@ type StatsSnapshot struct {
 	ReqPerSec float64            `json:"req_per_sec"`
 	LatencyMs map[string]float64 `json:"latency_ms"`
 	ByOp      map[string]*OpStat `json:"by_op"`
-	ByBucket  map[string]*OpStat `json:"by_bucket"`
 	ByStatus  map[string]int64   `json:"by_status"`
 }
 
@@ -187,7 +176,6 @@ func (s *Stats) snapshot() StatsSnapshot {
 		ReqPerSec: rps,
 		LatencyMs: percentiles(s.latencies),
 		ByOp:      cloneOps(s.byOp),
-		ByBucket:  cloneOps(s.byBucket),
 		ByStatus:  byStatus,
 	}
 }

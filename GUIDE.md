@@ -10,17 +10,16 @@ otherwise transparently re-signs and forwards every request to the real backend.
 - [3. Install & build](#3-install--build)
 - [4. Running the proxy](#4-running-the-proxy)
 - [5. Pointing your client at it](#5-pointing-your-client-at-it)
-- [6. Statistics](#6-statistics)
+- [6. Statistics & load testing](#6-statistics--load-testing)
 - [7. Error injection](#7-error-injection)
 - [8. Matching R2 errors exactly (429 verified)](#8-matching-r2-errors-exactly-429-verified)
-- [9. Multi-tenancy & security](#9-multi-tenancy--security)
+- [9. Security](#9-security)
 - [10. Web console](#10-web-console)
 - [11. CLI reference](#11-cli-reference)
 - [12. Admin API reference](#12-admin-api-reference)
 - [13. Deployment](#13-deployment)
-- [14. Operating the live instance](#14-operating-the-live-instance)
-- [15. Configuration reference](#15-configuration-reference)
-- [16. Troubleshooting](#16-troubleshooting)
+- [14. Configuration reference](#14-configuration-reference)
+- [15. Troubleshooting](#15-troubleshooting)
 
 ---
 
@@ -29,13 +28,14 @@ otherwise transparently re-signs and forwards every request to the real backend.
 | Capability | Detail |
 |---|---|
 | **Transparent MITM** | Full visibility of every request/response; streams large objects without buffering. |
-| **Statistics** | Per-op / per-bucket / per-status counters, bytes in/out, latency p50/p90/p99, live request feed. |
-| **Error injection** | Filter by bucket / key / op; probability; any status (`500`, `503`, `429`, …) with a real S3 error body + `Retry-After`; latency injection; fire-count limits. |
-| **Multi-tenant + secure** | Each user gets isolated proxy credentials, upstream target, stats, rules, and a scoped console token. Tenants cannot see or use each other's credentials or data. |
+| **Statistics** | Per-op / per-status counters, bytes in/out, latency p50/p90/p99, live request feed. |
+| **Error injection** | Filter by key / op; probability; any status (`500`, `503`, `429`, …) with a byte-exact R2 error body + `Retry-After`; latency injection. |
+| **Simple auth** | One proxy access key + secret for S3 clients; one admin token for the console. |
 | **UI + CLI** | A web console and an `r2proxy` CLI, both over the admin API. |
 | **Trivial deploy** | One static Go binary (UI embedded, no runtime deps); or Docker; or one command to an Ubicloud VM. |
 
-Ports: **8080** = S3 data-plane proxy · **8081** = admin API + web console.
+Ports: **8080** = S3 data-plane proxy · **8081** = admin API + web console. It
+proxies a **single** upstream target.
 
 ---
 
@@ -51,18 +51,18 @@ request and **re-originates** it:
    your app  ───────────────────────▶  r2proxy  ───────────────────────▶  R2
                                           │
                           verify signature · classify op
-                          stats · error injection · isolation
+                          statistics · error injection
 ```
 
-1. **Authenticate** — parse the caller's access key, look up the tenant, and
-   **recompute and compare their SigV4 signature** against the tenant's proxy
-   secret. This is real authentication, not a key-id match.
+1. **Authenticate** — check the caller's access key against the single proxy
+   access key, then **recompute and compare their SigV4 signature** against the
+   proxy secret. This proves possession of the secret; the proxy is not an open
+   relay to your R2.
 2. **Classify** — derive `(op, bucket, key)` from method + path + query.
-3. **Inject** — consult the tenant's rules; maybe short-circuit with an error or
-   add latency.
+3. **Inject** — consult the rules; maybe short-circuit with an error or add latency.
 4. **Re-sign & forward** — strip the caller's auth headers, sign fresh with the
-   tenant's real R2 credentials (payload `UNSIGNED-PAYLOAD`, so bodies stream),
-   send to R2, and relay the response back verbatim.
+   real R2 credentials (payload `UNSIGNED-PAYLOAD`, so bodies stream), send to
+   R2, and relay the response back verbatim.
 
 `aws-chunked` streaming uploads (used by the AWS CLI for large PUTs) are decoded
 back to the raw object bytes before re-signing, so all clients upload correctly.
@@ -71,8 +71,8 @@ back to the raw object bytes before re-signing, so all clients upload correctly.
 
 ## 3. Install & build
 
-Requirements: Go 1.22+ (build only). The binary itself has **no runtime
-dependencies** and embeds the web UI.
+Requirements: Go 1.22+ (build only). The binary has **no runtime dependencies**
+and embeds the web UI.
 
 ```bash
 make build      # -> dist/r2proxy         (host binary)
@@ -84,8 +84,6 @@ make docker     # -> r2proxy:latest image
 
 ## 4. Running the proxy
 
-Bootstrap a "default" tenant from your R2 credentials on first run:
-
 ```bash
 R2PROXY_ENDPOINT=https://ACCOUNT.r2.cloudflarestorage.com \
 R2PROXY_ACCESS_KEY=<r2 access key id> \
@@ -93,23 +91,24 @@ R2PROXY_SECRET_KEY=<r2 secret access key> \
 ./dist/r2proxy serve
 ```
 
-First-run output (store these — secrets are shown once):
+First-run output — the proxy credentials and admin token are generated and
+persisted (shown on every start):
 
 ```
-generated global admin token (store it): 8437....
-┌─ tenant credentials (shown once) ───────────────────────
-│ tenant id        t_e045b3...
-│ proxy access key b4733a9b180c...
-│ proxy secret key 32b8c49395ed...
-│ tenant token     6a85b23c9a7e...
-│ upstream         https://ACCOUNT.r2.cloudflarestorage.com
+┌─ r2proxy ready ─────────────────────────────────────────
+│ proxy endpoint    http://localhost:8080
+│ proxy access key  0123456789abcdef0123456789abcdef
+│ proxy secret key  fedcba9876543210fedcba9876543210…  (64 hex chars)
+│ upstream          https://ACCOUNT.r2.cloudflarestorage.com (auto)
+│ console           http://localhost:8081
+│ admin token       0f0e0d0c0b0a09080706050403020100f0e0d0c0b0a09080
 └─────────────────────────────────────────────────────────
-proxy (data-plane) listening on 0.0.0.0:8080
-admin API + UI listening on http://0.0.0.0:8081
 ```
 
-State (tenants, tokens, rules) persists to `--config` (default `r2proxy.json`,
-mode `0600`). Live statistics are in-memory and reset on restart.
+State (proxy creds, admin token, rules, upstream target) persists to `--config`
+(default `r2proxy.json`, mode `0600`). Live statistics are in-memory and reset on
+restart. On later runs you don't need the `--endpoint/--access-key/--secret-key`
+flags — they're read from the config.
 
 ---
 
@@ -161,30 +160,28 @@ the client side, put a TLS terminator (Caddy/nginx) in front of `:8080`.
 
 ---
 
-## 6. Statistics
+## 6. Statistics & load testing
 
 ```bash
 export R2PROXY_ADMIN=http://HOST:8081
-export R2PROXY_TOKEN=<tenant or admin token>
+export R2PROXY_TOKEN=<admin token>
 r2proxy stats            # summary
 r2proxy stats --json     # raw
 r2proxy tail             # live request feed
 ```
 
-Collected per tenant: total requests, req/s, in-flight, injected count, error
-count, bytes in/out, latency p50/p90/p99/avg, breakdowns by op / bucket / status,
-and a ring buffer of the last 200 requests (shown live in the console).
+Collected: total requests, req/s, in-flight, injected count, error count, bytes
+in/out, latency p50/p90/p99/avg, breakdowns by op and status, and a ring buffer
+of the last 200 requests (shown live in the console).
 
 ### Load testing (`loadtest.py`)
 
 `loadtest.py` PUTs many objects through the proxy concurrently and reports total
-duration and throughput — useful for exercising the stats and seeing real
-latency percentiles. It needs `boto3` (`pip install boto3`).
+duration and throughput. Needs `boto3`.
 
 ```bash
 export AWS_ACCESS_KEY_ID=<proxy access key>
 export AWS_SECRET_ACCESS_KEY=<proxy secret key>
-# 1000 objects of 1 MiB (~1 GB) at concurrency 32, then delete them:
 python3 loadtest.py --endpoint http://HOST:8080 \
   --count 1000 --size-mb 1 --concurrency 32 --cleanup
 ```
@@ -196,33 +193,30 @@ python3 loadtest.py --endpoint http://HOST:8080 \
 | `--count` | `1000` | number of objects |
 | `--size-mb` | `1` | size of each object (MiB) |
 | `--concurrency` | `32` | parallel uploads (also sizes the connection pool) |
-| `--prefix` | `load/` | key prefix (`load/obj-00001.bin`, …) |
+| `--prefix` | `load/` | key prefix |
 | `--cleanup` | off | delete the objects afterward |
 
 Output reports objects ok/failed, total MB, wall-clock duration, `obj/s`, `MB/s`,
-and average wall-time per object. Concurrency matters: serial uploads pay the
-full proxy→R2 round-trip per object, so raise `--concurrency` for throughput.
-After a run, `r2proxy stats` shows the recorded PutObjects, bytes, and latency.
+and average wall-time per object. Raise `--concurrency` for throughput.
 
 ---
 
 ## 7. Error injection
 
-A rule matches on `op` (comma list; blank = any), `bucket` glob, and `key` glob;
-fires with `probability` (0–1); then injects an S3 error (`status` + `code` +
-`message` + `retry_after`) and/or `delay_ms` of latency. `count` limits how many
-times it fires (`-1` = unlimited). Rules are evaluated top-to-bottom; the first
-**error** rule that fires wins (latency-only rules stack and continue).
+A rule matches on `op` (comma list; blank = any) and `key` glob; fires with
+`probability` (0–1); then injects an S3 error (`status` + `code` + `message` +
+`retry_after`) and/or `delay_ms` of latency. Rules are evaluated top-to-bottom;
+the first **error** rule that fires wins (latency-only rules stack and continue).
 
 ```bash
-# 30% of GetObjects on bucket "test" fail with R2's real 429 throttle:
-r2proxy rules add --op GetObject --bucket test --status 429 --prob 0.3
+# 30% of GetObjects on keys under photos/ fail with 503:
+r2proxy rules add --op GetObject --key 'photos/*' --status 503 --prob 0.3
+
+# R2's real 429 same-object throttle (byte-exact):
+r2proxy rules add --op GetObject --status 429
 
 # Inject 500ms of latency on everything:
 r2proxy rules add --op '*' --delay 500
-
-# Fail the next 3 PUTs with 503, then stop:
-r2proxy rules add --op PutObject --status 503 --count 3
 
 r2proxy rules list
 r2proxy rules toggle <id>
@@ -257,10 +251,9 @@ Content-Length: 159
 ```
 
 Note R2's 429 uses code **`ServiceUnavailable`** (not `SlowDown`/
-`TooManyRequests`) with that specific message and `Retry-After: 5`. A bare
-`--status 429` reproduces all of it automatically; r2proxy's injected 429 is a
-159-byte, byte-identical match, and SDKs parse it exactly as they parse R2's
-(`Code=ServiceUnavailable`, `HTTP 429`, `Retry-After=5`).
+`TooManyRequests`) with that message and `Retry-After: 5`. A bare `--status 429`
+reproduces all of it; the injected 429 is a 159-byte, byte-identical match, and
+SDKs parse it exactly as they parse R2's.
 
 R2-accurate defaults filled in when you omit fields:
 
@@ -273,9 +266,9 @@ R2-accurate defaults filled in when you omit fields:
 | 404 | `NoSuchKey` | The specified key does not exist. | — |
 | 403 | `AccessDenied` | Access Denied. | — |
 
-Override any of them with `--code`, `--message`, `--retry-after`. **Real** R2
-throttles (when you actually exceed R2's limits through the proxy) pass through
-untouched, with R2's own headers.
+Override any with `--code`, `--message`, `--retry-after`. **Real** R2 throttles
+(when you actually exceed R2's limits through the proxy) pass through untouched
+with R2's own headers.
 
 > Reproduce R2's real 429 yourself: PUT the same key from ~48 threads in a tight
 > loop; R2 starts returning `429 ServiceUnavailable / Retry-After: 5` within a
@@ -283,60 +276,34 @@ untouched, with R2's own headers.
 
 ---
 
-## 9. Multi-tenancy & security
+## 9. Security
 
-**Data plane.** Every request must be SigV4-signed with the tenant's **proxy
-secret**. r2proxy recomputes and compares the signature (constant-time), so
-holding only a proxy *access key* (not secret) is useless — you cannot use
-another tenant's upstream. Failure modes mirror S3:
-
-- unknown access key → `403 InvalidAccessKeyId`
-- bad signature → `403 SignatureDoesNotMatch`
-- stale clock (>15 min skew) → `403 RequestTimeTooSkewed`
-
-**Control plane.** The console/API require a bearer token:
-
-- a **tenant token** sees and manages only that tenant's stats and rules;
-- the **global admin token** manages tenants.
-
-Upstream and proxy **secrets are never returned** by the API — they are shown
-exactly once, at tenant creation. A tenant token passing `?tenant=<other>` is
-ignored; it only ever resolves to its own tenant.
-
-**Per-tenant bucket allowlist** (optional) restricts which buckets a tenant may
-touch (`403 AccessDenied` otherwise).
-
-Create an isolated tenant per user:
-
-```bash
-export R2PROXY_ADMIN=http://HOST:8081
-export R2PROXY_TOKEN=<global admin token>
-r2proxy tenant add --name alice \
-  --endpoint https://ACCOUNT.r2.cloudflarestorage.com \
-  --access-key <alice's R2 key> --secret-key <alice's R2 secret> \
-  --buckets alice-bucket        # optional allowlist
-# -> prints alice's proxy access key, proxy secret, and tenant token (once)
-```
-
-Hand Alice her proxy access key + secret (for her S3 client) and her tenant token
-(for the console). She never sees other tenants, their creds, or their traffic.
-
-**Network posture.** The data-plane port (`8080`) is safe to expose — it's
-authenticated by SigV4. Restrict the admin port (`8081`) to trusted IPs; the
-deploy script can lock it to your IP (`LOCK_ADMIN_TO_MY_IP=true`).
+- **Data plane:** every request must be SigV4-signed with the proxy secret.
+  r2proxy recomputes and compares the signature (constant-time), so holding only
+  the proxy *access key* (not secret) is useless — the proxy won't relay to your
+  R2. Failure modes mirror S3: unknown key → `403 InvalidAccessKeyId`; bad
+  signature → `403 SignatureDoesNotMatch`.
+- **Control plane:** the console/API require the single admin token (bearer, via
+  `Authorization: Bearer`, `X-Admin-Token`, or `?token=`).
+- The **real R2 credentials never leave the proxy** — clients present only the
+  proxy creds; the proxy re-signs with the real keys.
+- Secrets persist to `--config` (mode `0600`). Rotate by deleting the
+  `proxy_access_key_id` / `proxy_secret_key` / `admin_token` fields and
+  restarting (they regenerate), or set `--admin-token` to pin a known token.
+- **Network posture:** the data-plane port (`8080`) is safe to expose — it's
+  authenticated by SigV4. Restrict the admin port (`8081`) to trusted IPs; the
+  deploy script can lock it to your IP (`LOCK_ADMIN_TO_MY_IP=true`).
 
 ---
 
 ## 10. Web console
 
-Open `http://HOST:8081` and log in with a token.
+Open `http://HOST:8081` and log in with the admin token. The dashboard shows:
 
-- **Tenant token** → that tenant's dashboard only: connection info, stats cards,
-  by-op/by-status tables, live request feed, and the error-injection rule editor
-  (with error presets, including the verified 429).
-- **Global admin token** → everything above plus a **Tenants** panel: create
-  tenants (secrets shown once), list them with their proxy access key + tenant
-  token, switch which tenant you're viewing, and delete tenants.
+- **Connection** — the proxy URL, access key, secret, target endpoint, region
+  (copy-to-clipboard) so you can configure your client.
+- **Statistics** — stat cards, by-op and by-status tables, live request feed.
+- **Error injection** — the rule editor with presets (including the verified 429).
 
 The UI polls every 2s. Everything it does is available over the API/CLI too.
 
@@ -348,23 +315,17 @@ The CLI talks to the admin API. Configure with env:
 
 ```bash
 export R2PROXY_ADMIN=http://HOST:8081     # default http://127.0.0.1:8081
-export R2PROXY_TOKEN=<admin or tenant token>
-export R2PROXY_TENANT=<tenant id>          # only with the global admin token
+export R2PROXY_TOKEN=<admin token>
 ```
 
 ```
 r2proxy serve   [flags]                    run proxy + admin API + console
-r2proxy stats   [--json]                   tenant statistics
+r2proxy stats   [--json]                   statistics
 r2proxy tail                               live request feed
 r2proxy rules   list
-r2proxy rules   add --op O --bucket B --key K --prob P \
-                    --status S --code C --message M --retry-after N \
-                    --delay MS --count N
+r2proxy rules   add --op O --key K --prob P --status S \
+                    --code C --message M --retry-after N --delay MS
 r2proxy rules   toggle <id> | rm <id> | clear
-r2proxy tenant  list                       (superuser)
-r2proxy tenant  add --name N --endpoint U --access-key K --secret-key S \
-                    --region auto --buckets csv
-r2proxy tenant  rm <id>
 r2proxy version
 ```
 
@@ -373,26 +334,21 @@ r2proxy version
 ## 12. Admin API reference
 
 Bearer-token auth (`Authorization: Bearer <token>`, or `?token=`, or
-`X-Admin-Token`). Tenant-scoped routes use the token's tenant; a superuser
-selects one with `?tenant=<id>`.
+`X-Admin-Token`) — the single admin token. `/api/serverinfo` is public.
 
-| Method & path | Scope | Purpose |
-|---|---|---|
-| `GET /api/serverinfo` | public | version, proxy port |
-| `GET /api/me` | any | who am I (super / tenant) |
-| `GET /api/templates` | any | error presets |
-| `GET /api/tenants` | super | list tenants (no secrets) |
-| `POST /api/tenants` | super | create tenant (secrets once) |
-| `DELETE /api/tenants/{id}` | super | delete tenant |
-| `GET /api/info` | scoped | tenant connection info (no secrets) |
-| `GET /api/stats` | scoped | statistics snapshot |
-| `POST /api/stats/reset` | scoped | reset statistics |
-| `GET /api/recent` | scoped | recent requests (newest first) |
-| `GET /api/rules` | scoped | list rules |
-| `POST /api/rules` | scoped | add rule |
-| `DELETE /api/rules` | scoped | clear rules |
-| `DELETE /api/rules/{id}` | scoped | delete rule |
-| `POST /api/rules/{id}/toggle` | scoped | enable/disable rule |
+| Method & path | Purpose |
+|---|---|
+| `GET /api/serverinfo` | version, proxy port (public) |
+| `GET /api/info` | connection info: proxy access key + secret, endpoint host, region |
+| `GET /api/templates` | error presets |
+| `GET /api/stats` | statistics snapshot |
+| `POST /api/stats/reset` | reset statistics |
+| `GET /api/recent` | recent requests (newest first) |
+| `GET /api/rules` | list rules |
+| `POST /api/rules` | add rule |
+| `DELETE /api/rules` | clear rules |
+| `DELETE /api/rules/{id}` | delete rule |
+| `POST /api/rules/{id}/toggle` | enable/disable rule |
 
 ---
 
@@ -403,7 +359,7 @@ selects one with `?tenant=<id>`.
 ```bash
 cp deploy.env.example deploy.env      # fill in UBI_TOKEN + R2 creds + settings
 ./deploy.sh up                        # provision VM + firewall, build, install, start
-./deploy.sh info                      # print URLs + first-run credentials
+./deploy.sh info                      # print URLs + credentials
 ./deploy.sh push                      # rebuild binary + swap in + restart (redeploy)
 ./deploy.sh logs                      # tail service logs
 ./deploy.sh ssh                       # shell on the VM
@@ -413,9 +369,8 @@ cp deploy.env.example deploy.env      # fill in UBI_TOKEN + R2 creds + settings
 `deploy.sh` builds a static binary, creates a private subnet + firewall (opens
 `8080` to the world — it's authenticated; opens SSH + `8081` to your IP when
 `LOCK_ADMIN_TO_MY_IP=true`), uploads the binary, and installs a `systemd`
-service (`Restart=always`, `CAP_NET_BIND_SERVICE`). **Redeploy to a fresh
-server** by changing `DEPLOY_NAME` / `DEPLOY_LOCATION` and running `up` again —
-each name is an independent instance.
+service (`Restart=always`, `CAP_NET_BIND_SERVICE`). Redeploy to a **fresh**
+server by changing `DEPLOY_NAME` / `DEPLOY_LOCATION` and running `up` again.
 
 ### Docker (anywhere)
 
@@ -433,28 +388,7 @@ It's a single static binary — copy `dist/r2proxy`, drop in an env file and a u
 
 ---
 
-## 14. Operating the live instance
-
-A test instance is currently deployed on Ubicloud:
-
-- **Proxy (point your app here):** `http://144.76.134.100:8080`
-- **Console + API:** `http://144.76.134.100:8081`
-- Credentials are in `./deploy.sh info` (read from the VM's service logs).
-
-```bash
-./deploy.sh info        # URLs + admin token + default tenant creds
-./deploy.sh logs        # follow logs
-./deploy.sh push        # ship a new build
-./deploy.sh destroy     # stop billing when done
-```
-
-> The VM bills until `./deploy.sh destroy`. The admin port is currently open;
-> set `LOCK_ADMIN_TO_MY_IP=true` in `deploy.env` and re-run `./deploy.sh up` to
-> restrict it (the console token still protects it either way).
-
----
-
-## 15. Configuration reference
+## 14. Configuration reference
 
 `serve` flags (each has an env fallback):
 
@@ -463,25 +397,23 @@ A test instance is currently deployed on Ubicloud:
 | `--listen` | `R2PROXY_LISTEN` | `0.0.0.0:8080` | data-plane address |
 | `--admin-listen` | `R2PROXY_ADMIN_LISTEN` | `0.0.0.0:8081` | admin API + console |
 | `--config` | `R2PROXY_CONFIG` | `r2proxy.json` | state file (0600) |
-| `--admin-token` | `R2PROXY_ADMIN_TOKEN` | *(generated)* | global admin token |
-| `--endpoint` | `R2PROXY_ENDPOINT` | — | bootstrap: upstream URL |
-| `--access-key` | `R2PROXY_ACCESS_KEY` / `AWS_ACCESS_KEY_ID` | — | bootstrap: upstream key |
-| `--secret-key` | `R2PROXY_SECRET_KEY` / `AWS_SECRET_ACCESS_KEY` | — | bootstrap: upstream secret |
-| `--region` | `R2PROXY_REGION` | `auto` | bootstrap: region |
+| `--admin-token` | `R2PROXY_ADMIN_TOKEN` | *(generated)* | admin token |
+| `--endpoint` | `R2PROXY_ENDPOINT` | — | upstream URL |
+| `--access-key` | `R2PROXY_ACCESS_KEY` / `AWS_ACCESS_KEY_ID` | — | upstream key |
+| `--secret-key` | `R2PROXY_SECRET_KEY` / `AWS_SECRET_ACCESS_KEY` | — | upstream secret |
+| `--region` | `R2PROXY_REGION` | `auto` | region |
 
-Bootstrap only fires on first run when no tenants exist. Afterwards, manage
-tenants via the API/CLI/console.
+The upstream target is required on first run (via flags/env); afterwards it's
+read from the config file. Flags/env override the stored values when present.
 
 ---
 
-## 16. Troubleshooting
+## 15. Troubleshooting
 
 | Symptom | Cause / fix |
 |---|---|
-| `SignatureDoesNotMatch` | Client is using the wrong proxy secret, or not path-style. Set `forcePathStyle`/`addressing_style: path` and the tenant's proxy secret. |
-| `InvalidAccessKeyId` | Client's access key isn't a known tenant proxy key. Check `r2proxy tenant list`. |
-| `RequestTimeTooSkewed` | Client clock is off by >15 min. Fix the clock. |
+| `SignatureDoesNotMatch` | Client is using the wrong proxy secret, or not path-style. Set `forcePathStyle`/`addressing_style: path` and the proxy secret. |
+| `InvalidAccessKeyId` | Client's access key isn't the proxy access key. Check the startup banner or `GET /api/info`. |
 | Uploads fail only for large files | Ensure you're on a current build — `aws-chunked` streaming uploads are decoded before re-signing. |
-| Bucket returns `AccessDenied` for everything | Tenant has a `bucket_allowlist` that excludes it. |
 | Can't reach the console remotely | Admin port firewalled to your IP (`LOCK_ADMIN_TO_MY_IP`). Open it or use an SSH tunnel: `ssh -L 8081:localhost:8081 ...`. |
-| Stats reset after redeploy | Expected — live stats are in-memory; tenants/tokens/rules persist on disk. |
+| Stats reset after redeploy | Expected — live stats are in-memory; proxy creds/token/rules persist on disk. |

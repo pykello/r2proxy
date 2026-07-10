@@ -13,7 +13,6 @@ import (
 type Rule struct {
 	ID          string  `json:"id"`
 	Enabled     bool    `json:"enabled"`
-	Bucket      string  `json:"bucket"`      // glob, "" or "*" = any
 	Key         string  `json:"key"`         // glob, "" or "*" = any
 	Op          string  `json:"op"`          // op name(s), comma-separated; "" = any
 	Probability float64 `json:"probability"` // 0..1 chance the rule fires per matching request
@@ -22,9 +21,7 @@ type Rule struct {
 	Message     string  `json:"message"`     // S3 error message
 	RetryAfter  int     `json:"retry_after"` // Retry-After header seconds (0 = R2 default for 429/503)
 	DelayMs     int     `json:"delay_ms"`    // latency injected before responding
-	Remaining   int     `json:"remaining"`   // fires left; -1 = unlimited
 	Hits        int64   `json:"hits"`        // times this rule fired
-	Note        string  `json:"note"`        // freeform label
 }
 
 // Decision is the outcome of consulting the injection engine for a request.
@@ -38,7 +35,7 @@ type Decision struct {
 	RuleID     string
 }
 
-// Engine evaluates a tenant's ordered rule list against requests.
+// Engine evaluates the ordered rule list against requests.
 type Engine struct {
 	mu    sync.Mutex
 	rules []*Rule
@@ -59,7 +56,7 @@ func newEngine(rules []*Rule) *Engine {
 // request's filters and wins its probability roll determines the outcome.
 // A rule with Status==0 injects only latency and does not short-circuit;
 // evaluation then continues to later rules.
-func (e *Engine) decide(op, bucket, key string) Decision {
+func (e *Engine) decide(op, key string) Decision {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	var d Decision
@@ -67,10 +64,7 @@ func (e *Engine) decide(op, bucket, key string) Decision {
 		if !r.Enabled {
 			continue
 		}
-		if r.Remaining == 0 {
-			continue
-		}
-		if !r.matches(op, bucket, key) {
+		if !r.matches(op, key) {
 			continue
 		}
 		if r.Probability < 1.0 && e.rng.Float64() >= r.Probability {
@@ -78,9 +72,6 @@ func (e *Engine) decide(op, bucket, key string) Decision {
 		}
 		// Rule fires.
 		r.Hits++
-		if r.Remaining > 0 {
-			r.Remaining--
-		}
 		if r.DelayMs > 0 {
 			d.Delay += time.Duration(r.DelayMs) * time.Millisecond
 		}
@@ -98,8 +89,8 @@ func (e *Engine) decide(op, bucket, key string) Decision {
 	return d
 }
 
-func (r *Rule) matches(op, bucket, key string) bool {
-	return globMatch(r.Bucket, bucket) && globMatch(r.Key, key) && opMatch(r.Op, op)
+func (r *Rule) matches(op, key string) bool {
+	return globMatch(r.Key, key) && opMatch(r.Op, op)
 }
 
 func globMatch(pattern, s string) bool {
@@ -188,9 +179,5 @@ func (e *Engine) rulesSnapshot() []*Rule {
 var errorTemplates = []Rule{
 	{Code: "ServiceUnavailable", Status: 429, Message: "Reduce your concurrent request rate for the same object.", RetryAfter: 5},
 	{Code: "SlowDown", Status: 503, Message: "Please reduce your request rate.", RetryAfter: 1},
-	{Code: "ServiceUnavailable", Status: 503, Message: "The service is temporarily unavailable.", RetryAfter: 1},
 	{Code: "InternalError", Status: 500, Message: "We encountered an internal error. Please try again."},
-	{Code: "AccessDenied", Status: 403, Message: "Access Denied."},
-	{Code: "NoSuchKey", Status: 404, Message: "The specified key does not exist."},
-	{Code: "GatewayTimeout", Status: 504, Message: "The gateway timed out."},
 }

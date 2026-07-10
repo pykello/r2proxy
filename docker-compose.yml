@@ -12,7 +12,7 @@ services:
     environment:
       # Global admin token (leave unset to auto-generate on first boot; see logs).
       R2PROXY_ADMIN_TOKEN: ${R2PROXY_ADMIN_TOKEN:-}
-      # Optional: bootstrap a "default" tenant on first run from these.
+      # Upstream R2 target (required on first run).
       R2PROXY_ENDPOINT: ${R2PROXY_ENDPOINT:-}
       R2PROXY_ACCESS_KEY: ${R2PROXY_ACCESS_KEY:-}
       R2PROXY_SECRET_KEY: ${R2PROXY_SECRET_KEY:-}

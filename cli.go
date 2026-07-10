@@ -15,17 +15,15 @@ import (
 
 // adminClient talks to the admin API for the CLI subcommands.
 type adminClient struct {
-	base   string
-	token  string
-	tenant string
+	base  string
+	token string
 }
 
 func newAdminClient() *adminClient {
 	base := envOr("R2PROXY_ADMIN", "http://127.0.0.1:8081")
 	return &adminClient{
-		base:   strings.TrimRight(base, "/"),
-		token:  os.Getenv("R2PROXY_TOKEN"),
-		tenant: os.Getenv("R2PROXY_TENANT"),
+		base:  strings.TrimRight(base, "/"),
+		token: os.Getenv("R2PROXY_TOKEN"),
 	}
 }
 
@@ -34,13 +32,6 @@ func (c *adminClient) do(method, path string, body any) ([]byte, int, error) {
 	if body != nil {
 		b, _ := json.Marshal(body)
 		r = bytes.NewReader(b)
-	}
-	if c.tenant != "" {
-		sep := "?"
-		if strings.Contains(path, "?") {
-			sep = "&"
-		}
-		path += sep + "tenant=" + c.tenant
 	}
 	req, err := http.NewRequest(method, c.base+path, r)
 	if err != nil {
@@ -160,23 +151,18 @@ func cmdRules(args []string) {
 			fmt.Println("(no rules)")
 			return
 		}
-		fmt.Printf("%-14s %-4s %-18s %-10s %-8s %-5s %-9s %-6s %s\n", "id", "on", "op", "bucket", "key", "prob", "status", "left", "hits")
+		fmt.Printf("%-14s %-4s %-22s %-10s %-5s %-9s %-7s %s\n", "id", "on", "op", "key", "prob", "status", "delay", "hits")
 		for _, r := range rules {
 			on := "off"
 			if r.Enabled {
 				on = "on"
 			}
-			left := "∞"
-			if r.Remaining >= 0 {
-				left = strconv.Itoa(r.Remaining)
-			}
-			fmt.Printf("%-14s %-4s %-18s %-10s %-8s %-5.2g %-3d %-5s %-6s %d\n",
-				r.ID, on, orStar(r.Op), orStar(r.Bucket), orStar(r.Key), r.Probability, r.Status, r.Code, left, r.Hits)
+			fmt.Printf("%-14s %-4s %-22s %-10s %-5.2g %-3d %-5s %-7d %d\n",
+				r.ID, on, orStar(r.Op), orStar(r.Key), r.Probability, r.Status, r.Code, r.DelayMs, r.Hits)
 		}
 	case "add":
 		fs := newFlagSet("rules add")
 		op := fs.String("op", "", "op filter (csv)")
-		bucket := fs.String("bucket", "", "bucket glob")
 		key := fs.String("key", "", "key glob")
 		prob := fs.Float64("prob", 1.0, "probability 0..1")
 		status := fs.Int("status", 503, "http status")
@@ -184,10 +170,9 @@ func cmdRules(args []string) {
 		msg := fs.String("message", "", "error message (blank = R2 default)")
 		retryAfter := fs.Int("retry-after", 0, "Retry-After seconds (0 = R2 default for 429/503)")
 		delay := fs.Int("delay", 0, "delay ms")
-		count := fs.Int("count", -1, "max fires (-1=inf)")
 		parseCLIFlags(fs, args[1:])
-		rule := Rule{Op: *op, Bucket: *bucket, Key: *key, Probability: *prob,
-			Status: *status, Code: *code, Message: *msg, RetryAfter: *retryAfter, DelayMs: *delay, Remaining: *count}
+		rule := Rule{Op: *op, Key: *key, Probability: *prob,
+			Status: *status, Code: *code, Message: *msg, RetryAfter: *retryAfter, DelayMs: *delay}
 		var out Rule
 		c.mustJSON("POST", "/api/rules", rule, &out)
 		fmt.Printf("added rule %s\n", out.ID)
@@ -208,47 +193,6 @@ func cmdRules(args []string) {
 		fmt.Println("cleared")
 	default:
 		fatal("unknown rules subcommand %q (list|add|rm|toggle|clear)", args[0])
-	}
-}
-
-// ---- subcommand: tenant ----
-
-func cmdTenant(args []string) {
-	if len(args) == 0 {
-		args = []string{"list"}
-	}
-	c := newAdminClient()
-	switch args[0] {
-	case "list":
-		var ts []map[string]any
-		c.mustJSON("GET", "/api/tenants", nil, &ts)
-		fmt.Printf("%-16s %-16s %-40s %-34s %s\n", "id", "name", "endpoint", "proxy_access_key", "reqs")
-		for _, t := range ts {
-			fmt.Printf("%-16v %-16v %-40v %-34v %v\n", t["id"], t["name"], t["endpoint"], t["proxy_access_key"], t["total_requests"])
-		}
-	case "add":
-		fs := newFlagSet("tenant add")
-		name := fs.String("name", "", "tenant name")
-		endpoint := fs.String("endpoint", "", "upstream endpoint URL")
-		ak := fs.String("access-key", "", "upstream access key id")
-		sk := fs.String("secret-key", "", "upstream secret access key")
-		region := fs.String("region", "auto", "region")
-		buckets := fs.String("buckets", "", "bucket allowlist (csv)")
-		parseCLIFlags(fs, args[1:])
-		spec := TenantSpec{Name: *name, Endpoint: *endpoint, UpstreamKeyID: *ak,
-			UpstreamSecret: *sk, Region: *region, BucketAllowlist: *buckets}
-		var out map[string]any
-		c.mustJSON("POST", "/api/tenants", spec, &out)
-		fmt.Println("tenant created — secrets shown once:")
-		printJSON(out)
-	case "rm":
-		if len(args) < 2 {
-			fatal("usage: r2proxy tenant rm <id>")
-		}
-		c.mustJSON("DELETE", "/api/tenants/"+args[1], nil, nil)
-		fmt.Println("deleted", args[1])
-	default:
-		fatal("unknown tenant subcommand %q (list|add|rm)", args[0])
 	}
 }
 

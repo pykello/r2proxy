@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"net/http"
 	"strings"
-	"time"
 )
 
 // authInfo is the parsed content of an incoming Authorization header.
@@ -54,7 +53,7 @@ func parseAuthorization(r *http.Request) (authInfo, bool) {
 
 // verifyV4 recomputes the client's SigV4 signature using the given secret and
 // compares it (constant time) against the one they presented. This proves the
-// caller holds the tenant's proxy secret — real per-tenant authentication.
+// caller holds the proxy secret — real authentication, not a key-id match.
 //
 // It reconstructs the exact canonical request the client signed: their signed
 // header set/values, their host, and the payload hash they declared via
@@ -113,20 +112,6 @@ func verifyV4(r *http.Request, ai authInfo, secretKey string) bool {
 	expected := hex.EncodeToString(hmacSHA256(kSigning, stringToSign))
 
 	return hmac.Equal([]byte(expected), []byte(ai.Signature))
-}
-
-// skewOK checks the request timestamp is within maxSkew of now, blocking replay
-// of very old signed requests. Empty/unparseable dates fail.
-func skewOK(r *http.Request, maxSkew time.Duration) bool {
-	t, err := time.Parse("20060102T150405Z", r.Header.Get("X-Amz-Date"))
-	if err != nil {
-		return false
-	}
-	d := time.Since(t)
-	if d < 0 {
-		d = -d
-	}
-	return d <= maxSkew
 }
 
 func trimAll(s string) string { return strings.TrimSpace(s) }

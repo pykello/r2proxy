@@ -134,8 +134,8 @@ cmd_info(){
   echo "  proxy (S3 data-plane) : http://$ip:8080"
   echo "  admin console + API   : http://$ip:8081"
   echo
-  echo "  --- first-run credentials (from service logs) ---"
-  ubivm ssh -- "sudo journalctl -u r2proxy --no-pager | grep -E 'admin token|proxy access|proxy secret|tenant token|tenant id|upstream' | head -20" 2>/dev/null || true
+  echo "  --- credentials (from service logs) ---"
+  ubivm ssh -- "sudo journalctl -u r2proxy --no-pager | grep -E 'proxy access key|proxy secret key|admin token|upstream' | tail -8" 2>/dev/null || true
 }
 
 case "${1:-up}" in

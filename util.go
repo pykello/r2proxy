@@ -23,11 +23,8 @@ func newProxyAccessKey() string { return randHex(16) }
 // newProxySecret returns a 64-char secret.
 func newProxySecret() string { return randHex(32) }
 
-// newToken returns a 48-char admin/tenant token.
+// newToken returns a 48-char admin token.
 func newToken() string { return randHex(24) }
-
-// newTenantID returns a short slug for a tenant.
-func newTenantID() string { return "t_" + randHex(6) }
 
 // newRuleID returns a short id for an injection rule.
 func newRuleID() string { return "r_" + randHex(5) }

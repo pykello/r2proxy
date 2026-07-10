@@ -12,14 +12,13 @@
   }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
-  a{color:var(--accent2)}
   header{display:flex;align-items:center;gap:16px;padding:12px 20px;background:var(--panel);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:10;flex-wrap:wrap}
   header h1{font-size:16px;margin:0;font-weight:700;letter-spacing:.5px}
   header h1 span{color:var(--accent)}
   header .sp{flex:1}
   .pill{font-size:12px;color:var(--muted);border:1px solid var(--border);border-radius:20px;padding:3px 10px}
-  select,input,button,textarea{font:inherit;color:var(--fg);background:var(--panel2);border:1px solid var(--border);border-radius:6px;padding:6px 10px}
-  button{cursor:pointer;background:var(--panel2)}
+  select,input,button{font:inherit;color:var(--fg);background:var(--panel2);border:1px solid var(--border);border-radius:6px;padding:6px 10px}
+  button{cursor:pointer}
   button:hover{border-color:var(--accent)}
   button.primary{background:var(--accent);color:#111;border-color:var(--accent);font-weight:600}
   button.danger{color:var(--red);border-color:#5a2a2a}
@@ -49,9 +48,7 @@
   .note{color:var(--muted);font-size:12px}
   .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:13px}
   .kv .kk{color:var(--muted)}
-  code{font-family:var(--mono);background:var(--panel2);padding:1px 5px;border-radius:4px;font-size:12px}
   .hidden{display:none}
-  .banner{background:#20160a;border:1px solid var(--accent);border-radius:8px;padding:12px 14px;margin-bottom:14px}
   .login{max-width:420px;margin:80px auto;background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:26px}
   .login h1{margin:0 0 4px;font-size:20px}
   .login h1 span{color:var(--accent)}
@@ -64,9 +61,9 @@
 
 <div id="loginView" class="login hidden">
   <h1>r2<span>proxy</span> console</h1>
-  <p class="note">Enter your admin token (global) or a tenant token.</p>
+  <p class="note">Enter your admin token.</p>
   <div class="field" style="margin:14px 0">
-    <input id="tokenInput" type="password" placeholder="token" autocomplete="off" style="width:100%">
+    <input id="tokenInput" type="password" placeholder="admin token" autocomplete="off" style="width:100%">
   </div>
   <button class="primary" style="width:100%" onclick="doLogin()">Connect</button>
   <p id="loginErr" class="note" style="color:var(--red);margin-top:10px"></p>
@@ -75,47 +72,20 @@
 <div id="appView" class="hidden">
 <header>
   <h1>r2<span>proxy</span></h1>
-  <span class="pill" id="rolePill">—</span>
-  <select id="tenantSel" class="hidden" onchange="selectTenant(this.value)"></select>
   <span class="sp"></span>
   <span class="pill" id="verPill"></span>
   <button class="sm" onclick="logout()">logout</button>
 </header>
 <main>
 
-  <!-- Superuser tenant management -->
-  <section id="tenantsSection" class="hidden">
-    <h2>Tenants <button class="sm" onclick="toggleCreate()">+ new tenant</button></h2>
-    <div id="createBox" class="card hidden" style="margin-bottom:12px">
-      <div class="row">
-        <div class="field"><label>name</label><input id="c_name" placeholder="team-a"></div>
-        <div class="field"><label>endpoint</label><input id="c_endpoint" placeholder="https://ACCT.r2.cloudflarestorage.com" style="min-width:340px"></div>
-        <div class="field"><label>region</label><input id="c_region" value="auto"></div>
-      </div>
-      <div class="row" style="margin-top:8px">
-        <div class="field"><label>upstream access key</label><input id="c_ak" style="min-width:260px"></div>
-        <div class="field"><label>upstream secret</label><input id="c_sk" type="password" style="min-width:260px"></div>
-        <div class="field"><label>bucket allowlist (optional, csv)</label><input id="c_buckets" placeholder="test,other"></div>
-        <div class="field"><label>&nbsp;</label><button class="primary" onclick="createTenant()">create</button></div>
-      </div>
-    </div>
-    <div id="tenantCreated" class="banner hidden"></div>
-    <div class="tblwrap">
-      <table><thead><tr><th>name</th><th>id</th><th>endpoint</th><th>proxy access key</th><th>tenant token</th><th>reqs</th><th></th></tr></thead>
-      <tbody id="tenantsTbody"></tbody></table>
-    </div>
-  </section>
-
-  <!-- Connection info -->
-  <section id="connSection">
+  <section>
     <h2>Connection</h2>
     <div class="card">
       <div class="kv" id="connKv"></div>
-      <p class="note" style="margin:10px 0 0">Point your S3 client at the proxy URL above with <b>path-style</b> addressing, using the proxy access key + its secret. The proxy re-signs to R2.</p>
+      <p class="note" style="margin:10px 0 0">Point your S3 client at the proxy URL with <b>path-style</b> addressing, using the proxy access key + secret above. The proxy re-signs to R2.</p>
     </div>
   </section>
 
-  <!-- Stats -->
   <section>
     <h2>Statistics <button class="sm" onclick="resetStats()">reset</button></h2>
     <div class="grid cards" id="statCards"></div>
@@ -126,20 +96,17 @@
     <div><h2>By status</h2><div class="tblwrap"><table><thead><tr><th>status</th><th>count</th></tr></thead><tbody id="statusTbody"></tbody></table></div></div>
   </section>
 
-  <!-- Error injection -->
   <section>
     <h2>Error injection</h2>
     <div class="card" style="margin-bottom:12px">
       <div class="row">
         <div class="field"><label>op (csv, blank=any)</label><input id="r_op" placeholder="GetObject,PutObject"></div>
-        <div class="field"><label>bucket glob</label><input id="r_bucket" placeholder="*"></div>
         <div class="field"><label>key glob</label><input id="r_key" placeholder="*"></div>
         <div class="field"><label>prob 0-1</label><input id="r_prob" value="1.0" style="min-width:70px"></div>
         <div class="field"><label>status</label><input id="r_status" value="503" style="min-width:70px"></div>
         <div class="field"><label>code</label><input id="r_code" placeholder="(R2 default)"></div>
         <div class="field"><label>retry-after s</label><input id="r_retry" value="0" style="min-width:70px"></div>
         <div class="field"><label>delay ms</label><input id="r_delay" value="0" style="min-width:70px"></div>
-        <div class="field"><label>count (-1=∞)</label><input id="r_count" value="-1" style="min-width:70px"></div>
         <div class="field"><label>&nbsp;</label><button class="primary" onclick="addRule()">add rule</button></div>
       </div>
       <div class="row" style="margin-top:8px;align-items:center">
@@ -150,12 +117,11 @@
       </div>
     </div>
     <div class="tblwrap">
-      <table><thead><tr><th>on</th><th>op</th><th>bucket</th><th>key</th><th>prob</th><th>status</th><th>code</th><th>delay</th><th>left</th><th>hits</th><th></th></tr></thead>
+      <table><thead><tr><th>on</th><th>op</th><th>key</th><th>prob</th><th>status</th><th>code</th><th>retry</th><th>delay</th><th>hits</th><th></th></tr></thead>
       <tbody id="rulesTbody"></tbody></table>
     </div>
   </section>
 
-  <!-- Recent requests -->
   <section>
     <h2>Recent requests <span class="note" id="liveDot">● live</span></h2>
     <div class="tblwrap">
@@ -171,9 +137,7 @@
 
 <script>
 let TOKEN = localStorage.getItem("r2proxy_token") || "";
-let ME = null;            // {super, tenant}
-let CURRENT = null;       // current tenant id (for super: selected; for tenant: own)
-let SERVER = null;        // serverinfo
+let SERVER = null;
 let templates = [];
 let timer = null;
 
@@ -181,6 +145,7 @@ function h(s){return (s==null?"":String(s)).replace(/[&<>"]/g,c=>({"&":"&amp;","
 function bytes(n){if(n<1024)return n+" B";const u=["KB","MB","GB","TB"];let i=-1;do{n/=1024;i++}while(n>=1024&&i<u.length-1);return n.toFixed(1)+" "+u[i];}
 function flash(msg){const f=document.getElementById("flash");f.textContent=msg;f.classList.add("show");setTimeout(()=>f.classList.remove("show"),1800);}
 function copy(t){navigator.clipboard.writeText(t);flash("copied");}
+function v(id){return document.getElementById(id).value.trim();}
 
 async function api(path, opts){
   opts = opts || {};
@@ -192,25 +157,15 @@ async function api(path, opts){
   if(!res.ok) throw new Error((data&&data.error)||res.statusText);
   return data;
 }
-function scoped(path){
-  // superuser needs ?tenant=; tenant token is implicit
-  if(ME && ME.super && CURRENT){
-    return path + (path.includes("?")?"&":"?") + "tenant=" + encodeURIComponent(CURRENT);
-  }
-  return path;
-}
 
 async function doLogin(){
   TOKEN = document.getElementById("tokenInput").value.trim();
   if(!TOKEN)return;
-  try{
-    ME = await api("/api/me");
-    localStorage.setItem("r2proxy_token", TOKEN);
-    await boot();
-  }catch(e){ document.getElementById("loginErr").textContent = "invalid token"; }
+  try{ await api("/api/info"); localStorage.setItem("r2proxy_token", TOKEN); await boot(); }
+  catch(e){ document.getElementById("loginErr").textContent = "invalid token"; }
 }
 function logout(){
-  localStorage.removeItem("r2proxy_token"); TOKEN=""; ME=null;
+  localStorage.removeItem("r2proxy_token"); TOKEN="";
   if(timer)clearInterval(timer);
   document.getElementById("appView").classList.add("hidden");
   document.getElementById("loginView").classList.remove("hidden");
@@ -219,106 +174,32 @@ function logout(){
 async function boot(){
   document.getElementById("loginView").classList.add("hidden");
   document.getElementById("appView").classList.remove("hidden");
-  SERVER = await api("/api/serverinfo");
+  SERVER = await fetch("/api/serverinfo").then(r=>r.json());
   document.getElementById("verPill").textContent = "v"+(SERVER.version||"dev");
   templates = await api("/api/templates");
   renderTemplateBtns();
-  document.getElementById("rolePill").textContent = ME.super ? "superuser" : ("tenant: "+ME.tenant.name);
-
-  if(ME.super){
-    document.getElementById("tenantsSection").classList.remove("hidden");
-    const sel = document.getElementById("tenantSel");
-    sel.classList.remove("hidden");
-    await loadTenants();
-  }else{
-    CURRENT = ME.tenant.id;
-  }
-  if(CURRENT) await refreshAll();
-  startPolling();
-}
-
-function startPolling(){
+  await Promise.all([renderConn(), tick(), loadRules()]);
   if(timer)clearInterval(timer);
-  timer = setInterval(()=>{ if(CURRENT) tick().catch(()=>{}); }, 2000);
+  timer = setInterval(()=>tick().catch(()=>{}), 2000);
 }
-
-async function loadTenants(){
-  const ts = await api("/api/tenants");
-  const sel = document.getElementById("tenantSel");
-  const tb = document.getElementById("tenantsTbody");
-  tb.innerHTML=""; sel.innerHTML="";
-  (ts||[]).forEach(t=>{
-    const o=document.createElement("option");o.value=t.id;o.textContent=t.name+" ("+t.id+")";sel.appendChild(o);
-    tb.insertAdjacentHTML("beforeend",
-      `<tr><td>${h(t.name)}</td><td class="mono">${h(t.id)}</td><td class="mono">${h(t.endpoint)}</td>
-       <td class="mono">${h(t.proxy_access_key)}<span class="copy" onclick="copy('${h(t.proxy_access_key)}')">copy</span></td>
-       <td class="mono">${h(t.token)}<span class="copy" onclick="copy('${h(t.token)}')">copy</span></td>
-       <td>${t.total_requests||0}</td>
-       <td><button class="sm danger" onclick="delTenant('${h(t.id)}')">delete</button></td></tr>`);
-  });
-  if(!CURRENT && ts && ts.length){ CURRENT = ts[0].id; sel.value = CURRENT; }
-  if(CURRENT) sel.value = CURRENT;
-}
-
-async function selectTenant(id){ CURRENT=id; await refreshAll(); }
-
-function toggleCreate(){ document.getElementById("createBox").classList.toggle("hidden"); }
-
-async function createTenant(){
-  const body = {
-    name: v("c_name"), endpoint: v("c_endpoint"), region: v("c_region")||"auto",
-    upstreamaccesskeyid: undefined,
-  };
-  // map to server field names (json tags on TenantSpec are Go default: exported names)
-  const spec = {
-    Name: v("c_name"), Endpoint: v("c_endpoint"), Region: v("c_region")||"auto",
-    UpstreamKeyID: v("c_ak"), UpstreamSecret: v("c_sk"), BucketAllowlist: v("c_buckets")
-  };
-  try{
-    const t = await api("/api/tenants",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(spec)});
-    const box=document.getElementById("tenantCreated");
-    box.classList.remove("hidden");
-    box.innerHTML = `<b>Tenant created — copy these now (secrets shown once):</b>
-      <div class="kv" style="margin-top:8px">
-      <span class="kk">tenant id</span><span class="mono">${h(t.id)}</span>
-      <span class="kk">proxy access key</span><span class="mono">${h(t.proxy_access_key)} <span class="copy" onclick="copy('${h(t.proxy_access_key)}')">copy</span></span>
-      <span class="kk">proxy secret key</span><span class="mono">${h(t.proxy_secret_key)} <span class="copy" onclick="copy('${h(t.proxy_secret_key)}')">copy</span></span>
-      <span class="kk">tenant token</span><span class="mono">${h(t.token)} <span class="copy" onclick="copy('${h(t.token)}')">copy</span></span>
-      </div>`;
-    document.getElementById("createBox").classList.add("hidden");
-    await loadTenants();
-  }catch(e){ flash("error: "+e.message); }
-}
-async function delTenant(id){
-  if(!confirm("Delete tenant "+id+"? This removes its stats and rules."))return;
-  await api("/api/tenants/"+id,{method:"DELETE"});
-  if(CURRENT===id)CURRENT=null;
-  await loadTenants();
-  if(CURRENT) await refreshAll();
-}
-
-async function refreshAll(){ await Promise.all([renderConn(), tick(), loadRules()]); }
 
 async function tick(){
-  const [st, recent] = await Promise.all([ api(scoped("/api/stats")), api(scoped("/api/recent")) ]);
+  const [st, recent] = await Promise.all([ api("/api/stats"), api("/api/recent") ]);
   renderStats(st); renderRecent(recent);
 }
 
 async function renderConn(){
-  let t;
-  if(ME.super){ t = await api(scoped("/api/info")); } else { t = ME.tenant; }
-  const host = location.hostname;
-  const proxyURL = location.protocol+"//"+host+":"+(SERVER.proxy_port||"8080");
-  const kv=document.getElementById("connKv");
-  kv.innerHTML =
+  const t = await api("/api/info");
+  const proxyURL = location.protocol+"//"+location.hostname+":"+(SERVER.proxy_port||"8080");
+  document.getElementById("connKv").innerHTML =
     `<span class="kk">proxy URL</span><span class="mono">${h(proxyURL)} <span class="copy" onclick="copy('${h(proxyURL)}')">copy</span></span>
-     <span class="kk">proxy access key</span><span class="mono">${h(t.proxy_access_key)} <span class="copy" onclick="copy('${h(t.proxy_access_key)}')">copy</span></span>
+     <span class="kk">access key</span><span class="mono">${h(t.proxy_access_key)} <span class="copy" onclick="copy('${h(t.proxy_access_key)}')">copy</span></span>
+     <span class="kk">secret key</span><span class="mono">${h(t.proxy_secret_key)} <span class="copy" onclick="copy('${h(t.proxy_secret_key)}')">copy</span></span>
      <span class="kk">target endpoint</span><span class="mono">${h(t.endpoint_host)}</span>
-     <span class="kk">region</span><span class="mono">${h(t.region)}</span>`
-     + (t.bucket_allowlist?`<span class="kk">bucket allowlist</span><span class="mono">${h(t.bucket_allowlist)}</span>`:"");
+     <span class="kk">region</span><span class="mono">${h(t.region)}</span>`;
 }
 
-function statCard(k,v,sub){return `<div class="card"><div class="k">${k}</div><div class="v">${v}${sub?` <small>${sub}</small>`:""}</div></div>`;}
+function statCard(k,val,sub){return `<div class="card"><div class="k">${k}</div><div class="v">${val}${sub?` <small>${sub}</small>`:""}</div></div>`;}
 function renderStats(s){
   const lat=s.latency_ms||{};
   document.getElementById("statCards").innerHTML =
@@ -340,7 +221,6 @@ function renderStats(s){
     sb.insertAdjacentHTML("beforeend",`<tr><td class="status-${String(code)[0]}">${h(code)}</td><td>${n}</td></tr>`);
   });
 }
-
 function statusClass(s){return "status-"+String(s)[0];}
 function renderRecent(rows){
   const tb=document.getElementById("recentTbody"); tb.innerHTML="";
@@ -355,32 +235,30 @@ function renderRecent(rows){
 }
 
 async function loadRules(){
-  const rules = await api(scoped("/api/rules"));
+  const rules = await api("/api/rules");
   const tb=document.getElementById("rulesTbody"); tb.innerHTML="";
   (rules||[]).forEach(r=>{
     tb.insertAdjacentHTML("beforeend",
       `<tr class="${r.enabled?"":"off"}">
        <td><button class="sm" onclick="toggleRule('${h(r.id)}')">${r.enabled?"on":"off"}</button></td>
-       <td>${h(r.op||"*")}</td><td class="mono">${h(r.bucket||"*")}</td><td class="mono">${h(r.key||"*")}</td>
+       <td>${h(r.op||"*")}</td><td class="mono">${h(r.key||"*")}</td>
        <td>${r.probability}</td><td class="${statusClass(r.status)}">${r.status||"-"}</td><td>${h(r.code||"")}</td>
-       <td>${r.delay_ms||0}</td><td>${r.remaining<0?"∞":r.remaining}</td><td>${r.hits}</td>
+       <td>${r.retry_after||0}</td><td>${r.delay_ms||0}</td><td>${r.hits}</td>
        <td><button class="sm danger" onclick="delRule('${h(r.id)}')">×</button></td></tr>`);
   });
 }
-function v(id){return document.getElementById(id).value.trim();}
 async function addRule(){
   const rule={
-    op:v("r_op"), bucket:v("r_bucket"), key:v("r_key"),
-    probability:parseFloat(v("r_prob"))||1, status:parseInt(v("r_status"))||0,
-    code:v("r_code"), retry_after:parseInt(v("r_retry"))||0, delay_ms:parseInt(v("r_delay"))||0, remaining:parseInt(v("r_count"))
+    op:v("r_op"), key:v("r_key"), probability:parseFloat(v("r_prob"))||1,
+    status:parseInt(v("r_status"))||0, code:v("r_code"),
+    retry_after:parseInt(v("r_retry"))||0, delay_ms:parseInt(v("r_delay"))||0
   };
-  if(isNaN(rule.remaining))rule.remaining=-1;
-  try{ await api(scoped("/api/rules"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(rule)}); await loadRules(); flash("rule added"); }
+  try{ await api("/api/rules",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(rule)}); await loadRules(); flash("rule added"); }
   catch(e){ flash("error: "+e.message); }
 }
-async function toggleRule(id){ await api(scoped("/api/rules/"+id+"/toggle"),{method:"POST"}); await loadRules(); }
-async function delRule(id){ await api(scoped("/api/rules/"+id),{method:"DELETE"}); await loadRules(); }
-async function clearRules(){ if(!confirm("Clear all rules?"))return; await api(scoped("/api/rules"),{method:"DELETE"}); await loadRules(); }
+async function toggleRule(id){ await api("/api/rules/"+id+"/toggle",{method:"POST"}); await loadRules(); }
+async function delRule(id){ await api("/api/rules/"+id,{method:"DELETE"}); await loadRules(); }
+async function clearRules(){ if(!confirm("Clear all rules?"))return; await api("/api/rules",{method:"DELETE"}); await loadRules(); }
 function renderTemplateBtns(){
   const el=document.getElementById("templateBtns"); el.innerHTML="";
   templates.forEach(t=>{
@@ -389,13 +267,10 @@ function renderTemplateBtns(){
     el.appendChild(b);
   });
 }
-async function resetStats(){ await api(scoped("/api/stats/reset"),{method:"POST"}); await tick(); flash("stats reset"); }
+async function resetStats(){ await api("/api/stats/reset",{method:"POST"}); await tick(); flash("stats reset"); }
 
-// boot
 (async function(){
-  if(TOKEN){
-    try{ ME = await api("/api/me"); await boot(); return; }catch(e){}
-  }
+  if(TOKEN){ try{ await api("/api/info"); await boot(); return; }catch(e){} }
   document.getElementById("loginView").classList.remove("hidden");
 })();
 </script>

@@ -32,17 +32,16 @@ var authStripped = map[string]bool{
 	"expect":                       true,
 }
 
-// ProxyServer is the data-plane handler: it authenticates the tenant, applies
-// injection, and re-signs requests toward the tenant's upstream R2.
+// ProxyServer is the data-plane handler: it authenticates the caller against the
+// single proxy credential, applies injection, and re-signs requests to R2.
 type ProxyServer struct {
-	mgr    *Manager
+	app    *App
 	client *http.Client
-	skew   time.Duration
 }
 
-func newProxyServer(mgr *Manager) *ProxyServer {
+func newProxyServer(app *App) *ProxyServer {
 	return &ProxyServer{
-		mgr: mgr,
+		app: app,
 		client: &http.Client{
 			Transport: &http.Transport{
 				MaxIdleConns:          256,
@@ -54,7 +53,6 @@ func newProxyServer(mgr *Manager) *ProxyServer {
 			},
 			Timeout: 0,
 		},
-		skew: 15 * time.Minute,
 	}
 }
 
@@ -66,46 +64,35 @@ func (p *ProxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 1. Authenticate: identify tenant from the access key, verify signature.
+	// 1. Authenticate against the single proxy credential, verify signature.
 	ai, ok := parseAuthorization(r)
 	if !ok {
 		writeS3Error(w, s3Error{403, "AccessDenied", "Missing or malformed Authorization header", 0})
 		return
 	}
-	tenant := p.mgr.GetByProxyKey(ai.AccessKeyID)
-	if tenant == nil {
+	if ai.AccessKeyID != p.app.ProxyAccessKeyID {
 		writeS3Error(w, s3Error{403, "InvalidAccessKeyId", "The access key id you provided does not exist in our records.", 0})
 		return
 	}
-	if !skewOK(r, p.skew) {
-		writeS3Error(w, s3Error{403, "RequestTimeTooSkewed", "The difference between the request time and the current time is too large.", 0})
-		return
-	}
-	if !verifyV4(r, ai, tenant.ProxySecretKey) {
+	if !verifyV4(r, ai, p.app.ProxySecretKey) {
 		writeS3Error(w, s3Error{403, "SignatureDoesNotMatch", "The request signature we calculated does not match the signature you provided.", 0})
 		return
 	}
 
 	// 2. Classify.
-	s3 := classify(r, tenant.endpointHost())
+	s3 := classify(r)
 
-	// Optional per-tenant bucket allowlist.
-	if !bucketAllowed(tenant.BucketAllowlist, s3.Bucket) {
-		writeS3Error(w, s3Error{403, "AccessDenied", "Bucket not permitted for this tenant.", 0})
-		return
-	}
-
-	tenant.stats.begin()
+	p.app.stats.begin()
 	start := time.Now()
 	remote := clientIP(r)
 
 	// 3. Error injection.
-	dec := tenant.engine.decide(s3.Op, s3.Bucket, s3.Key)
+	dec := p.app.engine.decide(s3.Op, s3.Key)
 	if dec.Delay > 0 {
 		select {
 		case <-time.After(dec.Delay):
 		case <-r.Context().Done():
-			tenant.stats.record(reqRecord{
+			p.app.stats.record(reqRecord{
 				Time: start, Method: r.Method, Op: s3.Op, Bucket: s3.Bucket, Key: s3.Key,
 				Status: 499, DurationMs: msSince(start), Remote: remote, Err: "client canceled",
 			})
@@ -115,7 +102,7 @@ func (p *ProxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if dec.Inject {
 		e := resolveInjectedError(dec.Status, dec.Code, dec.Message, dec.RetryAfter)
 		writeS3Error(w, e)
-		tenant.stats.record(reqRecord{
+		p.app.stats.record(reqRecord{
 			Time: start, Method: r.Method, Op: s3.Op, Bucket: s3.Bucket, Key: s3.Key,
 			Status: e.Status, DurationMs: msSince(start), Remote: remote,
 			Injected: true, Err: "injected " + e.Code,
@@ -124,7 +111,7 @@ func (p *ProxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 4. Forward (re-sign) to upstream.
-	status, bytesIn, bytesOut, err := p.forward(w, r, tenant, s3)
+	status, bytesIn, bytesOut, err := p.forward(w, r, s3)
 	rec := reqRecord{
 		Time: start, Method: r.Method, Op: s3.Op, Bucket: s3.Bucket, Key: s3.Key,
 		Status: status, DurationMs: msSince(start), BytesIn: bytesIn, BytesOut: bytesOut,
@@ -136,13 +123,13 @@ func (p *ProxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			rec.Status = 502
 		}
 	}
-	tenant.stats.record(rec)
+	p.app.stats.record(rec)
 }
 
 // forward builds, signs, and sends the upstream request, streaming the response
 // back to the client. Returns upstream status and byte counts.
-func (p *ProxyServer) forward(w http.ResponseWriter, r *http.Request, t *Tenant, s3 S3Request) (status int, bytesIn, bytesOut int64, err error) {
-	target := strings.TrimRight(t.Endpoint, "/") + r.URL.RequestURI()
+func (p *ProxyServer) forward(w http.ResponseWriter, r *http.Request, s3 S3Request) (status int, bytesIn, bytesOut int64, err error) {
+	target := strings.TrimRight(p.app.Endpoint, "/") + r.URL.RequestURI()
 
 	var body io.Reader = r.Body
 	chunked := isAWSChunked(r.Header.Get("X-Amz-Content-Sha256"), r.Header.Get("Content-Encoding"))
@@ -189,7 +176,7 @@ func (p *ProxyServer) forward(w http.ResponseWriter, r *http.Request, t *Tenant,
 		}
 	}
 
-	signV4(outReq, t.UpstreamKeyID, t.UpstreamSecret, regionOr(t.Region), "s3", UnsignedPayload, time.Now())
+	signV4(outReq, p.app.UpstreamKeyID, p.app.UpstreamSecret, regionOr(p.app.Region), "s3", UnsignedPayload, time.Now())
 
 	resp, err := p.client.Do(outReq)
 	if err != nil {
@@ -328,19 +315,6 @@ func defaultRetryAfter(status int) int {
 	default:
 		return 0
 	}
-}
-
-func bucketAllowed(allowlist, bucket string) bool {
-	allowlist = strings.TrimSpace(allowlist)
-	if allowlist == "" || bucket == "" {
-		return true
-	}
-	for _, b := range strings.Split(allowlist, ",") {
-		if strings.TrimSpace(b) == bucket {
-			return true
-		}
-	}
-	return false
 }
 
 func regionOr(r string) string {
