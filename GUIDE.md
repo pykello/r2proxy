@@ -175,6 +175,35 @@ Collected per tenant: total requests, req/s, in-flight, injected count, error
 count, bytes in/out, latency p50/p90/p99/avg, breakdowns by op / bucket / status,
 and a ring buffer of the last 200 requests (shown live in the console).
 
+### Load testing (`loadtest.py`)
+
+`loadtest.py` PUTs many objects through the proxy concurrently and reports total
+duration and throughput — useful for exercising the stats and seeing real
+latency percentiles. It needs `boto3` (`pip install boto3`).
+
+```bash
+export AWS_ACCESS_KEY_ID=<proxy access key>
+export AWS_SECRET_ACCESS_KEY=<proxy secret key>
+# 1000 objects of 1 MiB (~1 GB) at concurrency 32, then delete them:
+python3 loadtest.py --endpoint http://HOST:8080 \
+  --count 1000 --size-mb 1 --concurrency 32 --cleanup
+```
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--endpoint` | `http://144.76.134.100:8080` | proxy data-plane URL |
+| `--bucket` | `test` | target bucket |
+| `--count` | `1000` | number of objects |
+| `--size-mb` | `1` | size of each object (MiB) |
+| `--concurrency` | `32` | parallel uploads (also sizes the connection pool) |
+| `--prefix` | `load/` | key prefix (`load/obj-00001.bin`, …) |
+| `--cleanup` | off | delete the objects afterward |
+
+Output reports objects ok/failed, total MB, wall-clock duration, `obj/s`, `MB/s`,
+and average wall-time per object. Concurrency matters: serial uploads pay the
+full proxy→R2 round-trip per object, so raise `--concurrency` for throughput.
+After a run, `r2proxy stats` shows the recorded PutObjects, bytes, and latency.
+
 ---
 
 ## 7. Error injection
