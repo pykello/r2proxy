@@ -82,7 +82,7 @@
     <h2>Connection</h2>
     <div class="card">
       <div class="kv" id="connKv"></div>
-      <p class="note" id="connNote" style="margin:10px 0 0"></p>
+      <div class="note" id="connNote" style="margin:10px 0 0"></div>
     </div>
   </section>
 
@@ -197,10 +197,11 @@ async function renderConn(){
      <span class="kk">secret key</span><span class="mono">${h(t.proxy_secret_key)} <span class="copy" onclick="copy('${h(t.proxy_secret_key)}')">copy</span></span>
      <span class="kk">region</span><span class="mono">${h(t.region)}</span>`;
   document.getElementById("connNote").innerHTML =
-    `Point your S3 client at the <b>endpoint</b> above with <b>path-style</b> addressing, using the access key + secret. `+
-    `Requests are re-signed and forwarded to <code>${h(t.endpoint_host)}</code>. `+
-    `To repoint at a different R2/S3 backend, change <code>endpoint</code> / <code>upstream_access_key_id</code> / <code>upstream_secret_key</code> in the config file `+
-    `(<code>r2proxy.json</code>, or the <code>--endpoint</code>/<code>--access-key</code>/<code>--secret-key</code> flags) and restart.`;
+    `<ul style="margin:0;padding-left:18px">`+
+    `<li>Point your S3 client at the <b>endpoint</b> above with <b>path-style</b> addressing, using the access key + secret.</li>`+
+    `<li>Requests are re-signed and forwarded to <code>${h(t.endpoint_host)}</code>.</li>`+
+    `<li>To repoint at a different R2/S3 backend: edit <code>endpoint</code> / <code>upstream_access_key_id</code> / <code>upstream_secret_key</code> in <code>r2proxy.json</code> (or pass <code>--endpoint</code>/<code>--access-key</code>/<code>--secret-key</code>), then restart: <code>sudo systemctl restart r2proxy</code></li>`+
+    `</ul>`;
 }
 
 function statCard(k,val,sub){return `<div class="card"><div class="k">${k}</div><div class="v">${val}${sub?` <small>${sub}</small>`:""}</div></div>`;}
