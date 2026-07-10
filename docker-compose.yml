@@ -1,0 +1,22 @@
+services:
+  r2proxy:
+    build: .
+    # Or use a prebuilt image once published:
+    # image: ghcr.io/you/r2proxy:latest
+    restart: unless-stopped
+    ports:
+      - "8080:8080"   # S3 data-plane proxy
+      - "8081:8081"   # admin API + web console
+    volumes:
+      - r2proxy-data:/data   # persists tenants, tokens, and rules
+    environment:
+      # Global admin token (leave unset to auto-generate on first boot; see logs).
+      R2PROXY_ADMIN_TOKEN: ${R2PROXY_ADMIN_TOKEN:-}
+      # Optional: bootstrap a "default" tenant on first run from these.
+      R2PROXY_ENDPOINT: ${R2PROXY_ENDPOINT:-}
+      R2PROXY_ACCESS_KEY: ${R2PROXY_ACCESS_KEY:-}
+      R2PROXY_SECRET_KEY: ${R2PROXY_SECRET_KEY:-}
+      R2PROXY_REGION: ${R2PROXY_REGION:-auto}
+
+volumes:
+  r2proxy-data:

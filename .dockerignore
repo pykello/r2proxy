@@ -1,0 +1,6 @@
+dist/
+*.log
+r2proxy.json
+r2proxy.json.tmp
+deploy.env
+.git/
