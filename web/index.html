@@ -82,7 +82,7 @@
     <h2>Connection</h2>
     <div class="card">
       <div class="kv" id="connKv"></div>
-      <p class="note" style="margin:10px 0 0">Point your S3 client at the proxy URL with <b>path-style</b> addressing, using the proxy access key + secret above. The proxy re-signs to R2.</p>
+      <p class="note" id="connNote" style="margin:10px 0 0"></p>
     </div>
   </section>
 
@@ -190,13 +190,17 @@ async function tick(){
 
 async function renderConn(){
   const t = await api("/api/info");
-  const proxyURL = location.protocol+"//"+location.hostname+":"+(SERVER.proxy_port||"8080");
+  const endpoint = location.protocol+"//"+location.hostname+":"+(SERVER.proxy_port||"8080");
   document.getElementById("connKv").innerHTML =
-    `<span class="kk">proxy URL</span><span class="mono">${h(proxyURL)} <span class="copy" onclick="copy('${h(proxyURL)}')">copy</span></span>
+    `<span class="kk">endpoint</span><span class="mono">${h(endpoint)} <span class="copy" onclick="copy('${h(endpoint)}')">copy</span></span>
      <span class="kk">access key</span><span class="mono">${h(t.proxy_access_key)} <span class="copy" onclick="copy('${h(t.proxy_access_key)}')">copy</span></span>
      <span class="kk">secret key</span><span class="mono">${h(t.proxy_secret_key)} <span class="copy" onclick="copy('${h(t.proxy_secret_key)}')">copy</span></span>
-     <span class="kk">target endpoint</span><span class="mono">${h(t.endpoint_host)}</span>
      <span class="kk">region</span><span class="mono">${h(t.region)}</span>`;
+  document.getElementById("connNote").innerHTML =
+    `Point your S3 client at the <b>endpoint</b> above with <b>path-style</b> addressing, using the access key + secret. `+
+    `Requests are re-signed and forwarded to <code>${h(t.endpoint_host)}</code>. `+
+    `To repoint at a different R2/S3 backend, change <code>endpoint</code> / <code>upstream_access_key_id</code> / <code>upstream_secret_key</code> in the config file `+
+    `(<code>r2proxy.json</code>, or the <code>--endpoint</code>/<code>--access-key</code>/<code>--secret-key</code> flags) and restart.`;
 }
 
 function statCard(k,val,sub){return `<div class="card"><div class="k">${k}</div><div class="v">${val}${sub?` <small>${sub}</small>`:""}</div></div>`;}
