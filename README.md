@@ -99,7 +99,7 @@ python3 loadtest.py --endpoint http://HOST:8080 --count 1000 --size-mb 1 --concu
 
 Flags: `--endpoint --bucket --count --size-mb --concurrency --prefix --cleanup`.
 Afterward, `r2proxy stats` shows the recorded PutObjects, bytes, and latency
-percentiles. See [GUIDE.md](GUIDE.md#load-testing-loadtestpy) for details.
+percentiles.
 
 ## Error injection
 
