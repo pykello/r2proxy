@@ -49,6 +49,7 @@ r2proxy tail           # live request feed
 r2proxy rules add --op GetObject --status 503 --prob 0.3   # 30% of GETs fail 503
 r2proxy rules add --op GetObject --status 429              # R2's exact same-object throttle
 r2proxy rules add --op '*' --delay 500                     # 500ms latency on everything
+r2proxy rules add --op GetObject --status 503 --max-fail-per-object 2   # each object fails twice, then recovers (retry test)
 r2proxy rules list | toggle <id> | rm <id> | clear
 ```
 

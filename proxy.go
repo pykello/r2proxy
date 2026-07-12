@@ -87,7 +87,7 @@ func (p *ProxyServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	remote := clientIP(r)
 
 	// 3. Error injection.
-	dec := p.app.engine.decide(s3.Op, s3.Key)
+	dec := p.app.engine.decide(s3.Op, s3.Bucket, s3.Key)
 	if dec.Delay > 0 {
 		select {
 		case <-time.After(dec.Delay):

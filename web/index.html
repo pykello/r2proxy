@@ -107,6 +107,7 @@
         <div class="field"><label>code</label><input id="r_code" placeholder="(R2 default)"></div>
         <div class="field"><label>retry-after s</label><input id="r_retry" value="0" style="min-width:70px"></div>
         <div class="field"><label>delay ms</label><input id="r_delay" value="0" style="min-width:70px"></div>
+        <div class="field"><label>max fail/obj</label><input id="r_maxfail" value="0" placeholder="∞" style="min-width:70px"></div>
         <div class="field"><label>&nbsp;</label><button class="primary" onclick="addRule()">add rule</button></div>
       </div>
       <div class="row" style="margin-top:8px;align-items:center">
@@ -117,7 +118,7 @@
       </div>
     </div>
     <div class="tblwrap">
-      <table><thead><tr><th>on</th><th>op</th><th>key</th><th>prob</th><th>status</th><th>code</th><th>retry</th><th>delay</th><th>hits</th><th></th></tr></thead>
+      <table><thead><tr><th>on</th><th>op</th><th>key</th><th>prob</th><th>status</th><th>code</th><th>retry</th><th>delay</th><th>max/obj</th><th>hits</th><th></th></tr></thead>
       <tbody id="rulesTbody"></tbody></table>
     </div>
   </section>
@@ -248,7 +249,7 @@ async function loadRules(){
        <td><button class="sm" onclick="toggleRule('${h(r.id)}')">${r.enabled?"on":"off"}</button></td>
        <td>${h(r.op||"*")}</td><td class="mono">${h(r.key||"*")}</td>
        <td>${r.probability}</td><td class="${statusClass(r.status)}">${r.status||"-"}</td><td>${h(r.code||"")}</td>
-       <td>${r.retry_after||0}</td><td>${r.delay_ms||0}</td><td>${r.hits}</td>
+       <td>${r.retry_after||0}</td><td>${r.delay_ms||0}</td><td>${r.max_failures_per_object||"∞"}</td><td>${r.hits}</td>
        <td><button class="sm danger" onclick="delRule('${h(r.id)}')">×</button></td></tr>`);
   });
 }
@@ -256,7 +257,8 @@ async function addRule(){
   const rule={
     op:v("r_op"), key:v("r_key"), probability:parseFloat(v("r_prob"))||1,
     status:parseInt(v("r_status"))||0, code:v("r_code"),
-    retry_after:parseInt(v("r_retry"))||0, delay_ms:parseInt(v("r_delay"))||0
+    retry_after:parseInt(v("r_retry"))||0, delay_ms:parseInt(v("r_delay"))||0,
+    max_failures_per_object:parseInt(v("r_maxfail"))||0
   };
   try{ await api("/api/rules",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(rule)}); await loadRules(); flash("rule added"); }
   catch(e){ flash("error: "+e.message); }

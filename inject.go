@@ -21,7 +21,28 @@ type Rule struct {
 	Message     string  `json:"message"`     // S3 error message
 	RetryAfter  int     `json:"retry_after"` // Retry-After header seconds (0 = R2 default for 429/503)
 	DelayMs     int     `json:"delay_ms"`    // latency injected before responding
-	Hits        int64   `json:"hits"`        // times this rule fired
+	// MaxFailuresPerObject caps how many times this rule injects an error for any
+	// single object (bucket/key); once reached, that object passes through. 0 =
+	// unlimited. Use with probability=1 for a deterministic "fail N times then
+	// recover" retry test.
+	MaxFailuresPerObject int   `json:"max_failures_per_object"`
+	Hits                 int64 `json:"hits"` // times this rule fired
+
+	// runtime, not persisted: injected-failure count per "bucket/key".
+	failed map[string]int
+}
+
+// capReached reports whether an object has already hit this rule's per-object
+// failure cap. A nil map reads as 0, so this is safe before any failures.
+func (r *Rule) capReached(obj string) bool {
+	return r.MaxFailuresPerObject > 0 && r.failed[obj] >= r.MaxFailuresPerObject
+}
+
+func (r *Rule) recordFailure(obj string) {
+	if r.failed == nil {
+		r.failed = map[string]int{}
+	}
+	r.failed[obj]++
 }
 
 // Decision is the outcome of consulting the injection engine for a request.
@@ -56,15 +77,21 @@ func newEngine(rules []*Rule) *Engine {
 // request's filters and wins its probability roll determines the outcome.
 // A rule with Status==0 injects only latency and does not short-circuit;
 // evaluation then continues to later rules.
-func (e *Engine) decide(op, key string) Decision {
+func (e *Engine) decide(op, bucket, key string) Decision {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	obj := bucket + "/" + key
 	var d Decision
 	for _, r := range e.rules {
 		if !r.Enabled {
 			continue
 		}
 		if !r.matches(op, key) {
+			continue
+		}
+		// Once an object has hit this rule's per-object failure cap, the rule is
+		// inert for it: the request passes through (or a later rule may apply).
+		if r.Status > 0 && r.capReached(obj) {
 			continue
 		}
 		if r.Probability < 1.0 && e.rng.Float64() >= r.Probability {
@@ -76,6 +103,7 @@ func (e *Engine) decide(op, key string) Decision {
 			d.Delay += time.Duration(r.DelayMs) * time.Millisecond
 		}
 		if r.Status > 0 {
+			r.recordFailure(obj) // count only injected failures toward the cap
 			d.Inject = true
 			d.Status = r.Status
 			d.Code = r.Code

@@ -151,14 +151,18 @@ func cmdRules(args []string) {
 			fmt.Println("(no rules)")
 			return
 		}
-		fmt.Printf("%-14s %-4s %-22s %-10s %-5s %-9s %-7s %s\n", "id", "on", "op", "key", "prob", "status", "delay", "hits")
+		fmt.Printf("%-14s %-4s %-20s %-10s %-5s %-9s %-6s %-8s %s\n", "id", "on", "op", "key", "prob", "status", "delay", "maxfail", "hits")
 		for _, r := range rules {
 			on := "off"
 			if r.Enabled {
 				on = "on"
 			}
-			fmt.Printf("%-14s %-4s %-22s %-10s %-5.2g %-3d %-5s %-7d %d\n",
-				r.ID, on, orStar(r.Op), orStar(r.Key), r.Probability, r.Status, r.Code, r.DelayMs, r.Hits)
+			maxFail := "∞"
+			if r.MaxFailuresPerObject > 0 {
+				maxFail = strconv.Itoa(r.MaxFailuresPerObject)
+			}
+			fmt.Printf("%-14s %-4s %-20s %-10s %-5.2g %-3d %-5s %-6d %-8s %d\n",
+				r.ID, on, orStar(r.Op), orStar(r.Key), r.Probability, r.Status, r.Code, r.DelayMs, maxFail, r.Hits)
 		}
 	case "add":
 		fs := newFlagSet("rules add")
@@ -170,9 +174,11 @@ func cmdRules(args []string) {
 		msg := fs.String("message", "", "error message (blank = R2 default)")
 		retryAfter := fs.Int("retry-after", 0, "Retry-After seconds (0 = R2 default for 429/503)")
 		delay := fs.Int("delay", 0, "delay ms")
+		maxFail := fs.Int("max-fail-per-object", 0, "cap injected failures per object (0 = unlimited)")
 		parseCLIFlags(fs, args[1:])
 		rule := Rule{Op: *op, Key: *key, Probability: *prob,
-			Status: *status, Code: *code, Message: *msg, RetryAfter: *retryAfter, DelayMs: *delay}
+			Status: *status, Code: *code, Message: *msg, RetryAfter: *retryAfter, DelayMs: *delay,
+			MaxFailuresPerObject: *maxFail}
 		var out Rule
 		c.mustJSON("POST", "/api/rules", rule, &out)
 		fmt.Printf("added rule %s\n", out.ID)
